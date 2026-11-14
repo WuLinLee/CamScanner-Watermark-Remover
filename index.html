@@ -179,13 +179,25 @@ function decodeWithToUnicode(bytes,cmap){
 function buildPageFontMaps(resources,P){
  const result=new Map();if(!resources)return result;
  const fonts=resources.lookupMaybe(P.PDFName.of("Font"),P.PDFDict);if(!fonts)return result;
- for(const name of fonts.keys()){
+ const addFontMap=(resourceName,font)=>{
   try{
-   const font=fonts.lookupMaybe(name,P.PDFDict);if(!font)continue;
-   const unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);if(!unicodeStream)continue;
+   let unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);
+   if(!unicodeStream){
+    const descendants=font.lookupMaybe(P.PDFName.of("DescendantFonts"),P.PDFArray);
+    if(descendants&&descendants.size()){
+     for(let i=0;i<descendants.size()&&!unicodeStream;i++){
+      const descendant=descendants.lookupMaybe(i,P.PDFDict);
+      if(descendant)unicodeStream=descendant.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);
+     }
+    }
+   }
+   if(!unicodeStream)return;
    const cmapText=bytesToLatin1(getStreamBytes(unicodeStream,P)),cmap=buildToUnicodeMap(cmapText);
-   if(cmap.map.size)result.set(name.asString().replace(/^\//,""),cmap);
+   if(cmap.map.size)result.set(resourceName,cmap);
   }catch(_){}
+ };
+ for(const name of fonts.keys()){
+  const font=fonts.lookupMaybe(name,P.PDFDict);if(font)addFontMap(name.asString().replace(/^\\//,""),font);
  }
  return result;
 }
@@ -256,23 +268,36 @@ function textFromShowCommand(command,fontMaps,P){
 function removeDirectTextWatermark(content,resources,context,P){
  const fontMaps=buildPageFontMaps(resources,P);
  if(!fontMaps.size)return{content,removed:0};
- const commands=parsePageContentCommands(content,context,P),ranges=[];
- let currentFont="",block=null;
+ const commands=parsePageContentCommands(content,context,P),shows=[];
+ let currentFont="";
  const showNames=new Set(["Tj","TJ","'",'"']);
- const targets=new Set(["扫描全能王创建","由扫描全能王创建","createdwithcamscanner"]);
  for(const command of commands){
-  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\//,"");
-  if(command.name==="BT")block={show:[]};
-  if(block&&showNames.has(command.name)){
+  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\\//,"");
+  if(showNames.has(command.name)){
    const decoded=textFromShowCommand({...command,fontName:currentFont},fontMaps,P);
-   block.show.push({command,text:decoded});
+   if(decoded)shows.push({command,text:normalizeWatermarkText(decoded)});
   }
-  if(command.name==="ET"&&block){
-   const combined=normalizeWatermarkText(block.show.map(x=>x.text).join(""));
-   if(targets.has(combined)&&block.show.length){
-    for(const item of block.show)ranges.push([item.command.start,item.command.end]);
+ }
+ // CamScanner exports can split a readable footer across several Tj/TJ
+ // instructions, sometimes across adjacent BT/ET blocks. Match only an exact
+ // contiguous sequence of shown text; never remove neighbouring page text.
+ const targets=["扫描全能王创建","由扫描全能王创建","createdwithcamscanner","createdbycamscanner","scannedwithcamscanner"];
+ const ranges=[],used=new Set();
+ for(let i=0;i<shows.length;i++){
+  for(const target of targets){
+   let combined="";
+   for(let j=i;j<shows.length&&j<i+24;j++){
+    combined+=shows[j].text;
+    if(combined===target){
+     for(let k=i;k<=j;k++){
+      const c=shows[k].command;
+      const key=c.start+":"+c.end;
+      if(!used.has(key)){ranges.push([c.start,c.end]);used.add(key);}
+     }
+     break;
+    }
+    if(!target.startsWith(combined))break;
    }
-   block=null;
   }
  }
  if(!ranges.length)return{content,removed:0};
@@ -281,7 +306,40 @@ function removeDirectTextWatermark(content,resources,context,P){
  for(const [start,end] of ranges)output=output.slice(0,start)+output.slice(end);
  return{content:output,removed:ranges.length};
 }
-
+function makeFlateReplacement(stream,bytes,context,P){
+ const dict={};
+ for(const [key,value] of stream.dict.entries()){
+  const name=key.asString().replace(/^\\//,"");
+  if(name!=="Length"&&name!=="Filter"&&name!=="DecodeParms")dict[name]=value;
+ }
+ return context.flateStream(bytes,dict);
+}
+function removeTextFromFormXObjects(resources,context,P,visited=new Set()){
+ if(!resources)return 0;
+ const xobjects=resources.lookupMaybe(P.PDFName.of("XObject"),P.PDFDict);if(!xobjects)return 0;
+ let removed=0;
+ for(const name of xobjects.keys()){
+  const stored=xobjects.get(name),stream=context.lookupMaybe(stored,P.PDFRawStream);
+  if(!stream)continue;
+  const subtype=stream.dict.lookupMaybe(P.PDFName.of("Subtype"),P.PDFName);
+  if(!subtype||subtype.asString()!=="/Form")continue;
+  const ref=stored instanceof P.PDFRef?stored:context.getObjectRef(stream);
+  const identity=ref?ref.toString():name.asString();
+  if(visited.has(identity))continue;visited.add(identity);
+  const ownResources=stream.dict.lookupMaybe(P.PDFName.of("Resources"),P.PDFDict)||resources;
+  try{
+   const raw=bytesToLatin1(getStreamBytes(stream,P));
+   const result=removeDirectTextWatermark(raw,ownResources,context,P);
+   if(result.removed){
+    const replacement=makeFlateReplacement(stream,latin1ToBytes(result.content),context,P);
+    if(ref)context.assign(ref,replacement);else xobjects.set(name,replacement);
+    removed+=result.removed;
+   }
+  }catch(_){}
+  removed+=removeTextFromFormXObjects(ownResources,context,P,visited);
+ }
+ return removed;
+}
 async function cleanPdf(arrayBuffer,removeAnnotations,removeTextWatermark){
  const P=window.PDFLib;if(!P||!P.PDFDocument)throw new Error("PDF 处理库没有加载成功。请联网刷新网页后重试。");
  const {PDFDocument,PDFDict,PDFName,PDFArray,PDFRawStream}=P;
@@ -309,6 +367,7 @@ async function cleanPdf(arrayBuffer,removeAnnotations,removeTextWatermark){
    if(removeTextWatermark){
     const textResult=removeDirectTextWatermark(cleaned,resources,pdfDoc.context,P);
     cleaned=textResult.content;removedTextWatermarks+=textResult.removed;
+    removedTextWatermarks+=removeTextFromFormXObjects(resources,pdfDoc.context,P);
    }
    // Keep /Contents as a PDF array so pdf-lib can append future page content safely.
    const normalizedStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
