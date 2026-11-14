@@ -58,7 +58,7 @@ a{color:var(--blue)}
 
 <div class="note"><strong>自动下载：</strong>处理结果会下载到浏览器默认的“下载”文件夹。首次批量处理时，如果浏览器询问是否允许此网站下载多个文件，请选择“允许”。</div>
 <div class="note"><strong>文件名示例：</strong><br>合同.pdf → 合同_无水印_20261114_193055.pdf<br>原文件不会被覆盖。相同名称的文件会自动追加序号。</div>
-<div class="note"><strong>文字水印：</strong>工具会尝试读取 PDF 字体的 ToUnicode 映射，定位并直接删除内容确认为“扫描全能王 创建”的文字绘制指令，不会用白色方块覆盖页面。为避免误删正文，若水印文字与其他页脚文字混在同一个文字对象中，或字体没有可用的 Unicode 映射，工具会保留该文字并报告未识别。请检查处理结果。</div>
+<div class="note"><strong>文字水印：</strong>工具会读取 PDF 字体的 ToUnicode 映射；对没有 ToUnicode 映射的 GBK-EUC-H 等中文字体，也会按字体编码解码文字，再定位并直接删除内容确认为“扫描全能王 创建”的文字绘制指令，不会用白色方块覆盖页面。对无法可靠识别的文字会保留，避免误删正文。请检查处理结果。</div>
 <p class="small">技术来源：改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，遵循 MIT 许可。PDF 解析库 pdf-lib 1.17.1。</p>
 </section>
 <footer>网页版和 Release 下载版使用同一份 HTML。PDF 仅在本地处理；网页会从 jsDelivr 加载 PDF 处理库。</footer>
@@ -176,11 +176,23 @@ function decodeWithToUnicode(bytes,cmap){
  }
  return out;
 }
+function decodeWithPdfEncoding(bytes,encoding){
+ const name=String(encoding||"").replace(/^\\/+/, "").toUpperCase();
+ // CamScanner can use a predefined Adobe GBK CJK font encoding without
+ // embedding a ToUnicode CMap. Decode those source bytes directly.
+ if(/^GBK(?:-EUC)?-[HV]$/.test(name)){
+  try{return new TextDecoder("gbk").decode(bytes);}catch(_){}
+  try{return new TextDecoder("gb18030").decode(bytes);}catch(_){}
+ }
+ return null;
+}
 function buildPageFontMaps(resources,P){
  const result=new Map();if(!resources)return result;
  const fonts=resources.lookupMaybe(P.PDFName.of("Font"),P.PDFDict);if(!fonts)return result;
  const addFontMap=(resourceName,font)=>{
   try{
+   const encodingObject=font.lookupMaybe(P.PDFName.of("Encoding"),P.PDFName);
+   const encoding=encodingObject?encodingObject.asString().replace(/^\\/+/, ""):"";
    let unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);
    if(!unicodeStream){
     const descendants=font.lookupMaybe(P.PDFName.of("DescendantFonts"),P.PDFArray);
@@ -191,11 +203,13 @@ function buildPageFontMaps(resources,P){
      }
     }
    }
-   if(!unicodeStream)return;
-   const cmapText=bytesToLatin1(getStreamBytes(unicodeStream,P)),cmap=buildToUnicodeMap(cmapText);
-   if(cmap.map.size)result.set(resourceName,cmap);
+   const cmap=unicodeStream
+    ?buildToUnicodeMap(bytesToLatin1(getStreamBytes(unicodeStream,P)))
+    :{map:new Map(),lengths:[]};
+   // Retain a decoder entry for known CJK encodings even when ToUnicode is absent.
+   if(cmap.map.size||/^GBK(?:-EUC)?-[HV]$/i.test(encoding))result.set(resourceName,{...cmap,encoding});
   }catch(_){}
- };
+ };};
  for(const name of fonts.keys()){
   const font=fonts.lookupMaybe(name,P.PDFDict);if(font)addFontMap(name.asString().replace(/^\//,""),font);
  }
@@ -253,7 +267,17 @@ function textFromShowCommand(command,fontMaps,P){
  const fontName=command.fontName||"",cmap=fontMaps.get(fontName);
  const getText=obj=>{
   if(obj instanceof P.PDFString||obj instanceof P.PDFHexString){
-   const bytes=obj.asBytes();return cmap?decodeWithToUnicode(bytes,cmap):obj.decodeText();
+   const bytes=obj.asBytes();
+   if(cmap){
+    if(cmap.map&&cmap.map.size){
+     const mapped=decodeWithToUnicode(bytes,cmap);
+     if(!mapped.includes("\\ufffd"))return mapped;
+    }
+    const encoded=decodeWithPdfEncoding(bytes,cmap.encoding);
+    if(encoded!==null)return encoded;
+    if(cmap.map&&cmap.map.size)return decodeWithToUnicode(bytes,cmap);
+   }
+   return obj.decodeText();
   }
   return "";
  };
