@@ -258,7 +258,7 @@ function removeDirectTextWatermark(content,resources,context,P){
  if(!fontMaps.size)return{content,removed:0};
  const commands=parsePageContentCommands(content,context,P),ranges=[];
  let currentFont="",block=null;
- const showNames=new Set(["Tj","TJ","'","\\""]);
+ const showNames=new Set(["Tj","TJ","'",'"']);
  const targets=new Set(["扫描全能王创建","由扫描全能王创建","createdwithcamscanner"]);
  for(const command of commands){
   if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\//,"");
