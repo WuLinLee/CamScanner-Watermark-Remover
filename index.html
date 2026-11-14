@@ -138,11 +138,13 @@ async function cleanPdf(arrayBuffer,removeAnnotations,removeFooterMark){
   if(streams.length){
    let combined="";for(const s of streams){combined+=bytesToLatin1(getStreamBytes(s,P));if(!combined.endsWith("\n"))combined+="\n";}
    const names=detectWatermarkNames(combined,resourceNames);
-   if(names.size){
-    const cleaned=stripXObjectDraws(combined,names),newStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
-    node.set(PDFName.of("Contents"),pdfDoc.context.register(newStream));
-    if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
-   }
+   const cleaned=names.size?stripXObjectDraws(combined,names):combined;
+   // Keep /Contents as a PDF array: pdf-lib appends draw operators by calling
+   // PDFArray.push(), which fails when /Contents is stored as one bare stream.
+   const normalizedStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
+   const normalizedRef=pdfDoc.context.register(normalizedStream);
+   node.set(PDFName.of("Contents"),pdfDoc.context.obj([normalizedRef]));
+   if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
   }
   if(removeFooterMark){
    const {width,height}=page.getSize();
