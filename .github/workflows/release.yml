@@ -1,0 +1,42 @@
+name: Publish downloadable release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Package single-file browser app
+        run: |
+          mkdir -p release
+          cp index.html release/index.html
+          cp README.md release/README.md
+          cp THIRD-PARTY-NOTICES.md release/THIRD-PARTY-NOTICES.md
+          cp LICENSE release/LICENSE
+          cd release
+          zip -9 ../CamScanner-Watermark-Remover.zip index.html README.md THIRD-PARTY-NOTICES.md LICENSE
+          cd ..
+
+      - name: Create or update latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest browser-only build
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Download `index.html` and open it in a modern browser.
+            No Python, pip, Node.js, npm, or app installation is required.
+            PDF processing happens locally in the browser. The page loads pdf-lib from jsDelivr; PDF files are not uploaded.
+          files: |
+            release/index.html
+            CamScanner-Watermark-Remover.zip
