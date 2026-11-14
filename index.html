@@ -197,7 +197,7 @@ function buildPageFontMaps(resources,P){
   }catch(_){}
  };
  for(const name of fonts.keys()){
-  const font=fonts.lookupMaybe(name,P.PDFDict);if(font)addFontMap(name.asString().replace(/^\\//,""),font);
+  const font=fonts.lookupMaybe(name,P.PDFDict);if(font)addFontMap(name.asString().replace(/^\//,""),font);
  }
  return result;
 }
@@ -272,7 +272,7 @@ function removeDirectTextWatermark(content,resources,context,P){
  let currentFont="";
  const showNames=new Set(["Tj","TJ","'",'"']);
  for(const command of commands){
-  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\\//,"");
+  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\//,"");
   if(showNames.has(command.name)){
    const decoded=textFromShowCommand({...command,fontName:currentFont},fontMaps,P);
    if(decoded)shows.push({command,text:normalizeWatermarkText(decoded)});
@@ -309,7 +309,7 @@ function removeDirectTextWatermark(content,resources,context,P){
 function makeFlateReplacement(stream,bytes,context,P){
  const dict={};
  for(const [key,value] of stream.dict.entries()){
-  const name=key.asString().replace(/^\\//,"");
+  const name=key.asString().replace(/^\//,"");
   if(name!=="Length"&&name!=="Filter"&&name!=="DecodeParms")dict[name]=value;
  }
  return context.flateStream(bytes,dict);
