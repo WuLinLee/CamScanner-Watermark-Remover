@@ -177,7 +177,7 @@ function decodeWithToUnicode(bytes,cmap){
  return out;
 }
 function decodeWithPdfEncoding(bytes,encoding){
- const name=String(encoding||"").replace(/^\\/+/, "").toUpperCase();
+ const name=String(encoding||"").split("/").join("").toUpperCase();
  // CamScanner can use a predefined Adobe GBK CJK font encoding without
  // embedding a ToUnicode CMap. Decode those source bytes directly.
  if(/^GBK(?:-EUC)?-[HV]$/.test(name)){
@@ -192,7 +192,7 @@ function buildPageFontMaps(resources,P){
  const addFontMap=(resourceName,font)=>{
   try{
    const encodingObject=font.lookupMaybe(P.PDFName.of("Encoding"),P.PDFName);
-   const encoding=encodingObject?encodingObject.asString().replace(/^\\/+/, ""):"";
+   const encoding=encodingObject?encodingObject.asString().split("/").join(""):"";
    let unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);
    if(!unicodeStream){
     const descendants=font.lookupMaybe(P.PDFName.of("DescendantFonts"),P.PDFArray);
@@ -271,7 +271,7 @@ function textFromShowCommand(command,fontMaps,P){
    if(cmap){
     if(cmap.map&&cmap.map.size){
      const mapped=decodeWithToUnicode(bytes,cmap);
-     if(!mapped.includes("\\ufffd"))return mapped;
+     if(mapped.indexOf(String.fromCharCode(0xfffd))===-1)return mapped;
     }
     const encoded=decodeWithPdfEncoding(bytes,cmap.encoding);
     if(encoded!==null)return encoded;
