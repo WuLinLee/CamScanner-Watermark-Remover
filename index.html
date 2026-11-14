@@ -209,7 +209,7 @@ function buildPageFontMaps(resources,P){
    // Retain a decoder entry for known CJK encodings even when ToUnicode is absent.
    if(cmap.map.size||/^GBK(?:-EUC)?-[HV]$/i.test(encoding))result.set(resourceName,{...cmap,encoding});
   }catch(_){}
- };};
+ };
  for(const name of fonts.keys()){
   const font=fonts.lookupMaybe(name,P.PDFDict);if(font)addFontMap(name.asString().replace(/^\//,""),font);
  }
