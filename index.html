@@ -50,22 +50,15 @@ a{color:var(--blue)}
 <p id="fileInfo" class="file">还没有添加 PDF</p>
 <ul id="fileList" hidden></ul>
 <label class="small"><input id="removeAnnots" type="checkbox" checked> 同时移除 PDF 页面注释/链接对象（可能会移除原有超链接或表单注释）</label>
+<p><label class="small"><input id="removeFooterMark" type="checkbox" checked> 清除每页右下角“扫描全能王 创建”标识（覆盖右下角一小块白色区域）</label></p>
 <button id="process" class="primary full" disabled>批量去水印并自动下载</button>
 <progress id="progress" value="0" max="1" hidden></progress>
 <div id="status" aria-live="polite"></div>
 <div id="results" hidden class="note"></div>
 
-<div class="note"><strong>自动保存到桌面（只需设置一次浏览器）：</strong>
-<ol>
-<li>打开 Chrome 设置 → 下载内容（也可在地址栏输入 <code>chrome://settings/downloads</code>）。</li>
-<li>把“位置”改成“桌面 / Desktop”。</li>
-<li>关闭“下载前询问每个文件的保存位置”。</li>
-<li>首次批量下载时，如果浏览器询问是否允许此网站下载多个文件，选择“允许”。</li>
-</ol>
-以后网页和下载版都会自动把处理结果下载到浏览器的默认位置，也就是你设置的桌面。网页本身无法越过浏览器权限直接写系统桌面。
-</div>
+<div class="note"><strong>自动下载：</strong>处理结果会下载到浏览器默认的“下载”文件夹。首次批量处理时，如果浏览器询问是否允许此网站下载多个文件，请选择“允许”。</div>
 <div class="note"><strong>文件名示例：</strong><br>合同.pdf → 合同_无水印_20261114_193055.pdf<br>原文件不会被覆盖。相同名称的文件会自动追加序号。</div>
-<div class="note"><strong>适用范围：</strong>主要识别扫描全能王将角标作为独立 PDF 图片对象（XObject）绘制的文件。如果水印已与整页图像合并，无法无损分离；未识别到水印时会明确提示。请保留原始 PDF 并检查结果。</div>
+<div class="note"><strong>右下角文字标识：</strong>默认会在每页右下角覆盖一块白色区域（约页面宽度的 26%、高度的 4%），用于遮住“扫描全能王 创建”字样。这不是逆向修改 PDF 字体；如果正文、表格、签名或印章靠近右下角，请取消勾选或仔细检查输出。若水印已与整页扫描图像合并且超出该区域，仍可能无法清除。请保留原始 PDF。</div>
 <p class="small">技术来源：改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，遵循 MIT 许可。PDF 解析库 pdf-lib 1.17.1。</p>
 </section>
 <footer>网页版和 Release 下载版使用同一份 HTML。PDF 仅在本地处理；网页会从 jsDelivr 加载 PDF 处理库。</footer>
@@ -122,11 +115,11 @@ function detectWatermarkNames(content,resourceNames){
  let m;while((m=re.exec(content))!==null){const d=parseFloat(m[4]),a=parseFloat(m[1]),name=m[7];if(resourceNames.has(name)&&Math.abs(d)>0&&Math.abs(d)<=40&&Math.abs(a)<=300)names.add(name);}
  return names;
 }
-async function cleanPdf(arrayBuffer,removeAnnotations){
+async function cleanPdf(arrayBuffer,removeAnnotations,removeFooterMark){
  const P=window.PDFLib;if(!P||!P.PDFDocument)throw new Error("PDF 处理库没有加载成功。请联网刷新网页后重试。");
  const {PDFDocument,PDFDict,PDFName,PDFArray,PDFRawStream}=P;
  const pdfDoc=await PDFDocument.load(arrayBuffer,{updateMetadata:false,ignoreEncryption:true});
- let removedAnnots=0,removedXObjects=0;const pages=pdfDoc.getPages();
+ let removedAnnots=0,removedXObjects=0,removedFooterMarks=0;const pages=pdfDoc.getPages();
  for(const page of pages){
   const node=page.node;
   if(removeAnnotations){
@@ -142,14 +135,30 @@ async function cleanPdf(arrayBuffer,removeAnnotations){
   const contents=node.Contents(),streams=[];
   if(contents instanceof PDFRawStream)streams.push(contents);
   else if(contents instanceof PDFArray){for(let i=0;i<contents.size();i++){const s=contents.lookup(i);if(s instanceof PDFRawStream)streams.push(s);}}
-  if(!streams.length)continue;
-  let combined="";for(const s of streams){combined+=bytesToLatin1(getStreamBytes(s,P));if(!combined.endsWith("\n"))combined+="\n";}
-  const names=detectWatermarkNames(combined,resourceNames);if(!names.size)continue;
-  const cleaned=stripXObjectDraws(combined,names),newStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
-  node.set(PDFName.of("Contents"),pdfDoc.context.register(newStream));
-  if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
+  if(streams.length){
+   let combined="";for(const s of streams){combined+=bytesToLatin1(getStreamBytes(s,P));if(!combined.endsWith("\n"))combined+="\n";}
+   const names=detectWatermarkNames(combined,resourceNames);
+   if(names.size){
+    const cleaned=stripXObjectDraws(combined,names),newStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
+    node.set(PDFName.of("Contents"),pdfDoc.context.register(newStream));
+    if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
+   }
+  }
+  if(removeFooterMark){
+   const {width,height}=page.getSize();
+   const coverWidth=Math.min(Math.max(width*0.26,100),160);
+   const coverHeight=Math.min(Math.max(height*0.04,22),34);
+   const rotation=((page.getRotation().angle%360)+360)%360;
+   let cover;
+   if(rotation===90)cover={x:width-coverHeight,y:height-coverWidth,width:coverHeight,height:coverWidth};
+   else if(rotation===180)cover={x:0,y:height-coverHeight,width:coverWidth,height:coverHeight};
+   else if(rotation===270)cover={x:0,y:0,width:coverHeight,height:coverWidth};
+   else cover={x:width-coverWidth,y:0,width:coverWidth,height:coverHeight};
+   page.drawRectangle({...cover,color:P.rgb(1,1,1)});
+   removedFooterMarks++;
+  }
  }
- return{bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects};
+ return{bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects,removedFooterMarks};
 }
 function makeTimestamp(){
  const d=new Date(),p=n=>String(n).padStart(2,"0");
@@ -173,17 +182,19 @@ processButton.addEventListener("click",async()=>{
  for(let i=0;i<selectedFiles.length;i++){
   const file=selectedFiles[i];setStatus("正在处理 "+(i+1)+"/"+selectedFiles.length+"："+file.name,"note");
   try{
-   const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked);
+   const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked,$("removeFooterMark").checked);
    const name=makeOutputName(file,stamp,nameCounts),blob=new Blob([result.bytes],{type:"application/pdf"});
    triggerDownload(blob,name);success++;
-   const detected=result.removedXObjects>0?"已移除 "+result.removedXObjects+" 个独立图片对象":"未识别到水印对象";if(result.removedXObjects===0)unmatched++;
-   lines.push("✓ "+file.name+" → "+name+"（"+detected+"）");
+   const detected=result.removedXObjects>0?"已移除 "+result.removedXObjects+" 个独立图片对象":"未检测到独立图片对象";
+   if(result.removedXObjects===0&&!result.removedFooterMarks)unmatched++;
+   const footer=result.removedFooterMarks?"；右下角遮盖已应用 "+result.removedFooterMarks+" 页":"";
+   lines.push("✓ "+file.name+" → "+name+"（"+detected+footer+"）");
    await wait(450);
   }catch(e){failed++;lines.push("✕ "+file.name+"：处理失败 - "+(e.message||String(e)));}
   $("progress").value=i+1;$("results").textContent=lines.join("\n");
  }
  processButton.disabled=false;
- const message="批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+(unmatched?"；其中 "+unmatched+" 个未检测到可独立删除的水印对象。":"")+"请检查浏览器下载列表。";
+ const message="批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+(unmatched?"；其中 "+unmatched+" 个未检测到可独立删除的图片水印对象或右下角遮盖。":"")+"请检查浏览器下载列表。";
  setStatus(message,failed||unmatched?"error":"success");
  $("results").textContent=lines.join("\n")+"\n\n"+message+"\n保存位置：浏览器设置中的默认下载文件夹。";
 });
