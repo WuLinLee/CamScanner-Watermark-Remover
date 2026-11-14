@@ -193,9 +193,10 @@ function timestamp(){
  const d=new Date(),pad=n=>String(n).padStart(2,"0");
  return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+"_"+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
 }
-function makeOutputName(file,stamp,index){
+function makeOutputName(file,stamp,counts){
  const base=file.name.replace(/\.pdf$/i,"");
- return base+"_无水印_"+stamp+(index>1?"_"+String(index).padStart(2,"0"):"")+".pdf";
+ const count=counts.get(base)||0;counts.set(base,count+1);
+ return base+(count?"_"+String(count+1).padStart(2,"0"):"")+"_无水印_"+stamp+".pdf";
 }
 async function uniqueFileHandle(dir,desired){
  const dot=desired.lastIndexOf("."),base=desired.slice(0,dot),ext=desired.slice(dot);
@@ -215,13 +216,13 @@ processButton.addEventListener("click",async()=>{
  processButton.disabled=true;chooseFolderButton.disabled=true;
  progress.hidden=false;progress.max=selectedFiles.length;progress.value=0;
  resultsBox.hidden=false;resultsBox.textContent="开始批量处理……";
- const stamp=timestamp(),lines=[];let success=0,failed=0;
+ const stamp=timestamp(),lines=[],nameCounts=new Map();let success=0,failed=0;
  for(let i=0;i<selectedFiles.length;i++){
   const file=selectedFiles[i];
   status("正在处理 "+(i+1)+"/"+selectedFiles.length+"："+file.name,"note");
   try{
    const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked);
-   const name=makeOutputName(file,stamp,i+1),blob=new Blob([result.bytes],{type:"application/pdf"});
+   const name=makeOutputName(file,stamp,nameCounts),blob=new Blob([result.bytes],{type:"application/pdf"});
    if(outputMethod==="desktop"){
     const handle=await uniqueFileHandle(directoryHandle,name),writable=await handle.createWritable();
     await writable.write(blob);await writable.close();
