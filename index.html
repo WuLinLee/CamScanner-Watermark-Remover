@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#111827">
 <title>扫描全能王 PDF 批量水印清理器</title>
 <style>
-:root{color-scheme:light;--ink:#172033;--muted:#68758b;--line:#dce3ed;--blue:#2563eb;--bg:#f3f6fb;--green:#14783d}
+:root{color-scheme:light;--ink:#172033;--muted:#68758b;--line:#dce3ed;--blue:#2563eb;--bg:#f3f6fb}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{width:min(780px,calc(100% - 28px));margin:28px auto}
@@ -14,23 +14,18 @@ main{width:min(780px,calc(100% - 28px));margin:28px auto}
 h1{font-size:clamp(23px,4vw,30px);margin:0 0 6px;letter-spacing:-.03em}
 p{margin:8px 0}.sub{color:var(--muted);margin-bottom:18px}
 .privacy{border:1px solid #b8e2ca;background:#f0fbf4;color:#17623a;padding:12px 14px;border-radius:12px;margin:16px 0}
-.drop{display:block;border:2px dashed #bdc9d9;padding:24px 16px;border-radius:14px;text-align:center;cursor:pointer;background:#fafcff;transition:.15s}
+.drop{display:block;border:2px dashed #bdc9d9;padding:26px 16px;border-radius:14px;text-align:center;cursor:pointer;background:#fafcff;transition:.15s}
 .drop:hover,.drop.drag{border-color:var(--blue);background:#f1f6ff}
 input[type=file]{display:none}
 .file{color:var(--muted);font-size:14px;overflow-wrap:anywhere}
 button{border:0;border-radius:11px;padding:12px 17px;font-size:15px;font-weight:650;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
-.primary{background:var(--blue);color:white}.secondary{background:#eaf0f8;color:#1c2a40}
-.full{width:100%;margin-top:14px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
-.row button{flex:1;min-width:180px}
-.pill{display:inline-block;padding:3px 9px;border-radius:999px;background:#edf2f8;color:#536176;font-size:12px}
+.primary{background:var(--blue);color:#fff}.full{width:100%;margin-top:14px}
 .note,.error,.success{border-radius:12px;padding:12px 14px;margin-top:14px;font-size:14px}
 .note{background:#f6f8fb;border:1px solid var(--line);color:#526076}
 .error{background:#fff2f1;border:1px solid #f3c2bd;color:#9d2a21}
 .success{background:#effaf3;border:1px solid #b8e2ca;color:#17623a}
 .small{font-size:13px;color:var(--muted)}
-ul{padding-left:20px;margin:8px 0}
 #fileList{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:10px}
 #fileList li{padding:4px 0;overflow-wrap:anywhere;font-size:13px}
 progress{width:100%;height:12px;margin-top:12px;accent-color:var(--blue)}
@@ -44,91 +39,58 @@ a{color:var(--blue)}
 <main>
 <section class="card">
 <h1>扫描全能王 PDF 批量水印清理器</h1>
-<p class="sub">一次添加多份 PDF · 自动批量处理 · 文件名保留并添加时间后缀</p>
-<div class="privacy"><strong>隐私优先：</strong>PDF 内容只在当前浏览器本机处理，不会上传到网站。为了把文件直接写入桌面，需要你授权选择一次桌面文件夹。</div>
+<p class="sub">一次添加多个 PDF · 自动批量处理 · 自动下载到浏览器默认下载文件夹</p>
+<div class="privacy"><strong>隐私优先：</strong>PDF 只在当前浏览器本地处理，不会上传到本网站或其他服务器。</div>
 
 <label id="dropZone" class="drop" for="pdfFiles">
-<strong>拖入多个 PDF 到这里，或点击选择文件</strong>
-<div class="small">支持一次选择多份 PDF，也支持把一批 PDF 一起拖进来</div>
+<strong>把多个 PDF 一起拖到这里</strong>
+<div class="small">也可以点击此处，一次选择多份 PDF</div>
 <input id="pdfFiles" type="file" accept="application/pdf,.pdf" multiple>
 </label>
 <p id="fileInfo" class="file">还没有添加 PDF</p>
 <ul id="fileList" hidden></ul>
-
-<div class="row">
-<button id="chooseFolder" class="secondary">① 选择桌面文件夹</button>
-<span id="folderInfo" class="pill">尚未选择输出位置</span>
-</div>
-<p class="small">文件夹选择窗口会优先打开“桌面”。请在窗口中确认选择“桌面 / Desktop”。网页不能在未经授权的情况下自行访问系统桌面。</p>
-
-<label class="small"><input id="removeAnnots" type="checkbox" checked> 同时移除 PDF 页面注释/链接对象（可能会移除文档原有超链接或表单注释）</label>
-<button id="process" class="primary full" disabled>② 批量去水印并保存到桌面</button>
+<label class="small"><input id="removeAnnots" type="checkbox" checked> 同时移除 PDF 页面注释/链接对象（可能会移除原有超链接或表单注释）</label>
+<button id="process" class="primary full" disabled>批量去水印并自动下载</button>
 <progress id="progress" value="0" max="1" hidden></progress>
 <div id="status" aria-live="polite"></div>
 <div id="results" hidden class="note"></div>
 
-<div class="note"><strong>输出文件名示例：</strong><br>合同.pdf → 合同_无水印_20261114_193055.pdf<br><br><strong>兼容说明：</strong>直接写入所选桌面文件夹需要桌面版 Chrome 或 Edge。其他浏览器会回退为浏览器下载，下载位置由浏览器自己的设置决定。</div>
-<div class="note"><strong>适用范围：</strong>主要识别扫描全能王将角标作为独立 PDF 图片对象（XObject）绘制的文件。如果水印已与整页图像合并，无法无损分离；未识别到水印时会明确提示。请保留原始 PDF，并检查处理结果。</div>
-<p class="small">技术来源：改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，遵循其 MIT 许可。PDF 解析库 pdf-lib 1.17.1。</p>
+<div class="note"><strong>自动保存到桌面（只需设置一次浏览器）：</strong>
+<ol>
+<li>打开 Chrome 设置 → 下载内容（也可在地址栏输入 <code>chrome://settings/downloads</code>）。</li>
+<li>把“位置”改成“桌面 / Desktop”。</li>
+<li>关闭“下载前询问每个文件的保存位置”。</li>
+<li>首次批量下载时，如果浏览器询问是否允许此网站下载多个文件，选择“允许”。</li>
+</ol>
+以后网页和下载版都会自动把处理结果下载到浏览器的默认位置，也就是你设置的桌面。网页本身无法越过浏览器权限直接写系统桌面。
+</div>
+<div class="note"><strong>文件名示例：</strong><br>合同.pdf → 合同_无水印_20261114_193055.pdf<br>原文件不会被覆盖。相同名称的文件会自动追加序号。</div>
+<div class="note"><strong>适用范围：</strong>主要识别扫描全能王将角标作为独立 PDF 图片对象（XObject）绘制的文件。如果水印已与整页图像合并，无法无损分离；未识别到水印时会明确提示。请保留原始 PDF 并检查结果。</div>
+<p class="small">技术来源：改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，遵循 MIT 许可。PDF 解析库 pdf-lib 1.17.1。</p>
 </section>
-<footer>网页版与 Release 下载版使用同一份 index.html。PDF 不会上传；页面会从 jsDelivr 加载 PDF 处理库。</footer>
+<footer>网页版和 Release 下载版使用同一份 HTML。PDF 仅在本地处理；网页会从 jsDelivr 加载 PDF 处理库。</footer>
 </main>
 <script>
 (() => {
 "use strict";
-const $ = id => document.getElementById(id);
-const fileInput = $("pdfFiles"), dropZone = $("dropZone");
-const processButton = $("process"), chooseFolderButton = $("chooseFolder");
-const statusBox = $("status"), resultsBox = $("results"), progress = $("progress");
-let selectedFiles = [], directoryHandle = null, outputMethod = "download";
-
-function status(message, kind="note"){statusBox.className=kind;statusBox.textContent=message;}
-function isPdf(file){return file && (file.type==="application/pdf" || /\.pdf$/i.test(file.name));}
-function renderFiles(){
-  $("fileInfo").textContent = selectedFiles.length ? "已添加 "+selectedFiles.length+" 个 PDF 文件" : "还没有添加 PDF";
-  const list=$("fileList");list.innerHTML="";
-  for(const f of selectedFiles){const li=document.createElement("li");li.textContent=f.name+" · "+(f.size/1024/1024).toFixed(2)+" MB";list.appendChild(li);}
-  list.hidden=!selectedFiles.length;
-  processButton.disabled=!selectedFiles.length || (outputMethod==="desktop" && !directoryHandle);
-  resultsBox.hidden=true;
+const $=id=>document.getElementById(id),fileInput=$("pdfFiles"),dropZone=$("dropZone"),processButton=$("process");
+let selectedFiles=[];
+function setStatus(message,kind="note"){const box=$("status");box.className=kind;box.textContent=message;}
+function isPdf(f){return f&&(f.type==="application/pdf"||/\.pdf$/i.test(f.name));}
+function addFiles(files){
+ const incoming=Array.from(files||[]).filter(isPdf),seen=new Set(selectedFiles.map(f=>f.name+"|"+f.size+"|"+f.lastModified));
+ for(const f of incoming){const key=f.name+"|"+f.size+"|"+f.lastModified;if(!seen.has(key)){selectedFiles.push(f);seen.add(key);}}
+ $("fileInfo").textContent=selectedFiles.length?"已添加 "+selectedFiles.length+" 个 PDF 文件":"还没有添加 PDF";
+ const list=$("fileList");list.innerHTML="";
+ for(const f of selectedFiles){const li=document.createElement("li");li.textContent=f.name+" · "+(f.size/1024/1024).toFixed(2)+" MB";list.appendChild(li);}
+ list.hidden=!selectedFiles.length;processButton.disabled=!selectedFiles.length;
+ if(incoming.length)setStatus("已加入 "+incoming.length+" 个 PDF，可以继续拖入其他文件。","note");
+ else setStatus("没有找到 PDF 文件，请重新选择。","error");
 }
-function addFiles(files, append=false){
-  const incoming=Array.from(files||[]).filter(isPdf);
-  if(!append) selectedFiles=[];
-  const seen=new Set(selectedFiles.map(f=>f.name+"|"+f.size+"|"+f.lastModified));
-  for(const f of incoming){const key=f.name+"|"+f.size+"|"+f.lastModified;if(!seen.has(key)){selectedFiles.push(f);seen.add(key);}}
-  renderFiles();
-  if(incoming.length===0) status("没有找到 PDF 文件，请选择 .pdf 文件。","error");
-  else status("已加入 "+incoming.length+" 个 PDF。可以继续拖入更多文件。","note");
-}
-fileInput.addEventListener("change",()=>addFiles(fileInput.files,true));
+fileInput.addEventListener("change",()=>{addFiles(fileInput.files);fileInput.value="";});
 dropZone.addEventListener("dragover",e=>{e.preventDefault();dropZone.classList.add("drag");});
 dropZone.addEventListener("dragleave",()=>dropZone.classList.remove("drag"));
-dropZone.addEventListener("drop",e=>{e.preventDefault();dropZone.classList.remove("drag");addFiles(e.dataTransfer.files,true);});
-
-chooseFolderButton.addEventListener("click",async()=>{
-  if(!window.showDirectoryPicker || !window.isSecureContext){
-    outputMethod="download";directoryHandle=null;
-    $("folderInfo").textContent="浏览器不支持桌面直存";
-    status("当前浏览器不支持直接写入所选桌面文件夹。请换用桌面版 Chrome 或 Edge；否则只能使用浏览器默认下载位置。","error");
-    renderFiles();return;
-  }
-  try{
-    directoryHandle=await window.showDirectoryPicker({id:"pdf-watermark-output",mode:"readwrite",startIn:"desktop"});
-    let permission=await directoryHandle.queryPermission({mode:"readwrite"});
-    if(permission!=="granted") permission=await directoryHandle.requestPermission({mode:"readwrite"});
-    if(permission!=="granted") throw new Error("没有获得文件夹写入权限。");
-    outputMethod="desktop";
-    $("folderInfo").textContent="输出到："+directoryHandle.name;
-    status("输出文件夹已授权。请确认你选择的是桌面 / Desktop。","success");
-  }catch(e){
-    directoryHandle=null;outputMethod="desktop";
-    $("folderInfo").textContent="尚未授权输出文件夹";
-    if(e.name==="AbortError") status("你取消了文件夹选择。","note");
-    else status("无法访问所选文件夹："+e.message,"error");
-  }
-  renderFiles();
-});
+dropZone.addEventListener("drop",e=>{e.preventDefault();dropZone.classList.remove("drag");addFiles(e.dataTransfer.files);});
 
 function bytesToLatin1(bytes){return new TextDecoder("latin1").decode(bytes);}
 function latin1ToBytes(str){const out=new Uint8Array(str.length);for(let i=0;i<str.length;i++)out[i]=str.charCodeAt(i)&255;return out;}
@@ -187,66 +149,44 @@ async function cleanPdf(arrayBuffer,removeAnnotations){
   node.set(PDFName.of("Contents"),pdfDoc.context.register(newStream));
   if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
  }
- return {bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects};
+ return{bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects};
 }
-function timestamp(){
- const d=new Date(),pad=n=>String(n).padStart(2,"0");
- return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+"_"+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+function makeTimestamp(){
+ const d=new Date(),p=n=>String(n).padStart(2,"0");
+ return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());
 }
-function makeOutputName(file,stamp,counts){
- const base=file.name.replace(/\.pdf$/i,"");
- const count=counts.get(base)||0;counts.set(base,count+1);
+function makeOutputName(file,stamp,nameCounts){
+ const base=file.name.replace(/\.pdf$/i,""),count=nameCounts.get(base)||0;nameCounts.set(base,count+1);
  return base+(count?"_"+String(count+1).padStart(2,"0"):"")+"_无水印_"+stamp+".pdf";
 }
-async function uniqueFileHandle(dir,desired){
- const dot=desired.lastIndexOf("."),base=desired.slice(0,dot),ext=desired.slice(dot);
- let name=desired,n=2;
- while(true){
-  try{await dir.getFileHandle(name);name=base+"_"+String(n++).padStart(2,"0")+ext;}
-  catch(e){if(e.name==="NotFoundError")return await dir.getFileHandle(name,{create:true});throw e;}
- }
+function triggerDownload(blob,name){
+ const url=URL.createObjectURL(blob),a=document.createElement("a");
+ a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
-function downloadFile(blob,name){
- const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;
- document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
 processButton.addEventListener("click",async()=>{
  if(!selectedFiles.length)return;
- if(outputMethod==="desktop"&&!directoryHandle){status("请先选择桌面文件夹。","error");return;}
- processButton.disabled=true;chooseFolderButton.disabled=true;
- progress.hidden=false;progress.max=selectedFiles.length;progress.value=0;
- resultsBox.hidden=false;resultsBox.textContent="开始批量处理……";
- const stamp=timestamp(),lines=[],nameCounts=new Map();let success=0,failed=0;
+ processButton.disabled=true;$("progress").hidden=false;$("progress").max=selectedFiles.length;$("progress").value=0;
+ $("results").hidden=false;const stamp=makeTimestamp(),nameCounts=new Map(),lines=[];let success=0,failed=0,unmatched=0;
  for(let i=0;i<selectedFiles.length;i++){
-  const file=selectedFiles[i];
-  status("正在处理 "+(i+1)+"/"+selectedFiles.length+"："+file.name,"note");
+  const file=selectedFiles[i];setStatus("正在处理 "+(i+1)+"/"+selectedFiles.length+"："+file.name,"note");
   try{
    const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked);
    const name=makeOutputName(file,stamp,nameCounts),blob=new Blob([result.bytes],{type:"application/pdf"});
-   if(outputMethod==="desktop"){
-    const handle=await uniqueFileHandle(directoryHandle,name),writable=await handle.createWritable();
-    await writable.write(blob);await writable.close();
-   }else downloadFile(blob,name);
-   success++;
-   const detection=result.removedXObjects>0?"检测并移除 "+result.removedXObjects+" 个水印图片对象":"未识别到水印对象，请人工检查";
-   lines.push("✓ "+file.name+" → "+name+"（"+detection+"）");
+   triggerDownload(blob,name);success++;
+   const detected=result.removedXObjects>0?"已移除 "+result.removedXObjects+" 个独立图片对象":"未识别到水印对象";if(result.removedXObjects===0)unmatched++;
+   lines.push("✓ "+file.name+" → "+name+"（"+detected+"）");
+   await wait(450);
   }catch(e){failed++;lines.push("✕ "+file.name+"：处理失败 - "+(e.message||String(e)));}
-  progress.value=i+1;
-  resultsBox.textContent=lines.join("\n");
-  await new Promise(resolve=>setTimeout(resolve,0));
+  $("progress").value=i+1;$("results").textContent=lines.join("\n");
  }
- chooseFolderButton.disabled=false;processButton.disabled=false;
- const target=outputMethod==="desktop"?"已保存到："+directoryHandle.name:"已交给浏览器下载（保存位置由浏览器设置决定）";
- status("批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+target,failed?"error":"success");
- resultsBox.textContent=lines.join("\n")+"\n\n"+target;
+ processButton.disabled=false;
+ const message="批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+(unmatched?"；其中 "+unmatched+" 个未检测到可独立删除的水印对象。":"")+"请检查浏览器下载列表。";
+ setStatus(message,failed||unmatched?"error":"success");
+ $("results").textContent=lines.join("\n")+"\n\n"+message+"\n保存位置：浏览器设置中的默认下载文件夹。";
 });
-
-if(!window.showDirectoryPicker||!window.isSecureContext){
- $("folderInfo").textContent="当前浏览器将使用下载模式";
- $("chooseFolder").textContent="选择文件后直接下载";
- outputMethod="download";
-}
-renderFiles();
 })();
 </script>
 </body>
