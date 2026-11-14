@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>扫描全能王 PDF 水印清理器（本地版）</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#68758b; --line:#dce3ed; --blue:#2563eb; --bg:#f4f7fb; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(720px,calc(100% - 28px)); margin:36px auto; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 12px 36px rgba(21,36,64,.06); }
+    h1 { font-size:clamp(22px,4vw,30px); margin:0 0 8px; letter-spacing:-.03em; }
+    p { margin:8px 0; }
+    .sub { color:var(--muted); margin-bottom:22px; }
+    .privacy { border:1px solid #b8e2ca; background:#f0fbf4; color:#17623a; padding:12px 14px; border-radius:12px; margin:18px 0; }
+    .drop { display:block; border:2px dashed #bdc9d9; padding:24px 16px; border-radius:14px; text-align:center; cursor:pointer; background:#fafcff; }
+    .drop:hover { border-color:var(--blue); background:#f5f8ff; }
+    input[type=file] { display:block; width:100%; margin-top:12px; }
+    .file { color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
+    button { border:0; border-radius:11px; padding:13px 18px; font-size:16px; font-weight:650; cursor:pointer; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .primary { width:100%; margin-top:16px; background:var(--blue); color:white; }
+    .secondary { background:#eaf0f8; color:#1c2a40; }
+    .result,.error,.note { border-radius:12px; padding:12px 14px; margin-top:16px; }
+    .result { background:#effaf3; border:1px solid #b8e2ca; }
+    .error { background:#fff2f1; border:1px solid #f3c2bd; color:#9d2a21; }
+    .note { background:#f6f8fb; border:1px solid var(--line); color:#526076; font-size:14px; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    .actions button { flex:1; min-width:180px; }
+    .small { font-size:13px; color:var(--muted); }
+    footer { text-align:center; color:var(--muted); font-size:13px; padding:18px 6px; }
+    a { color:var(--blue); }
+    @media(max-width:520px) { main { margin:16px auto } .card { padding:18px } }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+<main>
+  <section class="card">
+    <h1>扫描全能王 PDF 水印清理器</h1>
+    <p class="sub">单文件网页工具 · 不用安装 Python、pip、Node.js 或手机 App</p>
+    <div class="privacy"><strong>隐私优先：</strong>PDF 在当前浏览器内存中处理，不会上传到本网站或任何服务器。网页只会加载 PDF 处理程序库。</div>
+    <label class="drop" for="pdfFile">
+      <strong>选择需要处理的 PDF</strong>
+      <div class="small">支持多页 PDF；请先保留原始文件备份</div>
+      <input id="pdfFile" type="file" accept="application/pdf,.pdf">
+    </label>
+    <p id="fileInfo" class="file">尚未选择文件</p>
+    <label class="small"><input id="removeAnnots" type="checkbox" checked> 同时清理 PDF 页面附带的链接/注释对象（可能会移除文档内原有超链接或表单注释）</label>
+    <button id="process" class="primary" disabled>在本机处理 PDF</button>
+    <div id="status" aria-live="polite"></div>
+    <div id="downloadArea" hidden class="result">
+      <strong>处理完成</strong>
+      <p id="summary" class="small"></p>
+      <div class="actions">
+        <button id="download" class="primary">下载清理后的 PDF</button>
+        <button id="reset" class="secondary">处理另一个文件</button>
+      </div>
+    </div>
+    <div class="note">
+      <strong>适用范围：</strong>主要针对扫描全能王把角标作为独立 PDF 图片对象（XObject）绘制的文件。若水印已与整页扫描图像合并，工具无法无损分离；若未检测到水印，输出不会凭空去掉它。
+    </div>
+    <p class="small">技术来源：本项目改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，并保留其 MIT 许可声明。</p>
+  </section>
+  <footer>所有处理在浏览器本地完成。建议先用一份不含敏感信息的样例文件测试效果。</footer>
+</main>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const fileInput = $("pdfFile");
+  const processButton = $("process");
+  const status = $("status");
+  const downloadArea = $("downloadArea");
+  let selectedFile = null;
+  let outputUrl = null;
+  let outputName = "cleaned.pdf";
+
+  const setStatus = (message, kind = "note") => {
+    status.className = kind;
+    status.textContent = message;
+  };
+
+  fileInput.addEventListener("change", () => {
+    selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+    $("fileInfo").textContent = selectedFile
+      ? selectedFile.name + " · " + (selectedFile.size / 1024 / 1024).toFixed(2) + " MB"
+      : "尚未选择文件";
+    processButton.disabled = !selectedFile;
+    downloadArea.hidden = true;
+    status.textContent = "";
+    if (outputUrl) URL.revokeObjectURL(outputUrl);
+    outputUrl = null;
+  });
+
+  function bytesToLatin1(bytes) {
+    return new TextDecoder("latin1").decode(bytes);
+  }
+  function latin1ToBytes(str) {
+    const out = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 255;
+    return out;
+  }
+  function getStreamBytes(stream, PDFLib) {
+    try { return PDFLib.decodePDFRawStream(stream).decode(); }
+    catch (_) { return stream.contents; }
+  }
+  function isDelim(ch) {
+    return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" ||
+      ch === "\f" || ch === "(" || ch === ")" || ch === "<" || ch === ">" ||
+      ch === "[" || ch === "]" || ch === "{" || ch === "}" || ch === "/" || ch === "%";
+  }
+
+  // 移除独立图形对象对应的 q ... Q 绘制块；嵌套图形状态会计数处理。
+  function stripXObjectDraws(content, targetNames) {
+    const out = [];
+    let i = 0;
+    while (i < content.length) {
+      const ch = content[i];
+      const prev = i > 0 ? content[i - 1] : " ";
+      if (ch === "q" && (i + 1 >= content.length || isDelim(content[i + 1])) && isDelim(prev)) {
+        let depth = 1, j = i + 1;
+        while (j < content.length && depth > 0) {
+          const cj = content[j], pj = content[j - 1], nj = j + 1 < content.length ? content[j + 1] : " ";
+          if (cj === "q" && isDelim(pj) && isDelim(nj)) { depth++; j++; }
+          else if (cj === "Q" && isDelim(pj) && (j + 1 >= content.length || isDelim(nj))) { depth--; j++; }
+          else if (cj === "(") {
+            let pdepth = 1; j++;
+            while (j < content.length && pdepth > 0) {
+              if (content[j] === "\\") { j += 2; continue; }
+              if (content[j] === "(") pdepth++;
+              else if (content[j] === ")") pdepth--;
+              j++;
+            }
+          } else j++;
+        }
+        const block = content.slice(i, j);
+        const doRegex = /\/([A-Za-z0-9_.+\-#]+)\s+Do\b/g;
+        let match, hit = false;
+        while ((match = doRegex.exec(block)) !== null) {
+          if (targetNames.has(match[1])) { hit = true; break; }
+        }
+        if (!hit) out.push(block);
+        i = j;
+      } else { out.push(ch); i++; }
+    }
+    return out.join("");
+  }
+
+  function detectWatermarkNames(content, resourceNames) {
+    const names = new Set();
+    if (resourceNames.has("X1")) names.add("X1");
+    const re = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+cm\s+\/([A-Za-z0-9_.+\-#]+)\s+Do/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      const d = parseFloat(m[4]), a = parseFloat(m[1]), name = m[7];
+      if (resourceNames.has(name) && Math.abs(d) > 0 && Math.abs(d) <= 40 && Math.abs(a) <= 300) names.add(name);
+    }
+    return names;
+  }
+
+  async function cleanPdf(arrayBuffer, removeAnnotations) {
+    const P = window.PDFLib;
+    if (!P || !P.PDFDocument) throw new Error("PDF 处理库没有加载成功。请联网刷新网页后再试。");
+    const { PDFDocument, PDFDict, PDFName, PDFArray, PDFRawStream } = P;
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { updateMetadata: false, ignoreEncryption: true });
+    let removedAnnots = 0, removedXObjects = 0;
+    const pages = pdfDoc.getPages();
+
+    for (const page of pages) {
+      const node = page.node;
+      if (removeAnnotations) {
+        const annots = node.Annots();
+        if (annots instanceof PDFArray) {
+          const refs = [];
+          for (let i = 0; i < annots.size(); i++) {
+            const value = annots.get(i);
+            if (value instanceof P.PDFRef) refs.push(value);
+          }
+          for (const ref of refs) {
+            try { node.removeAnnot(ref); removedAnnots++; } catch (_) {}
+          }
+          node.delete(PDFName.of("Annots"));
+        } else if (annots) node.delete(PDFName.of("Annots"));
+      }
+
+      const resources = node.Resources();
+      const xobjects = resources ? resources.lookup(PDFName.of("XObject"), PDFDict) : undefined;
+      const resourceNames = new Set();
+      if (xobjects) for (const key of xobjects.keys()) resourceNames.add(key.asString().replace(/^\//, ""));
+
+      const contents = node.Contents();
+      const streams = [];
+      if (contents instanceof PDFRawStream) streams.push(contents);
+      else if (contents instanceof PDFArray) {
+        for (let i = 0; i < contents.size(); i++) {
+          const stream = contents.lookup(i);
+          if (stream instanceof PDFRawStream) streams.push(stream);
+        }
+      }
+      if (!streams.length) continue;
+
+      let combined = "";
+      for (const stream of streams) {
+        combined += bytesToLatin1(getStreamBytes(stream, P));
+        if (!combined.endsWith("\n")) combined += "\n";
+      }
+      const watermarkNames = detectWatermarkNames(combined, resourceNames);
+      if (!watermarkNames.size) continue;
+
+      const cleaned = stripXObjectDraws(combined, watermarkNames);
+      const newStream = pdfDoc.context.flateStream(latin1ToBytes(cleaned));
+      const newRef = pdfDoc.context.register(newStream);
+      node.set(PDFName.of("Contents"), newRef);
+      if (xobjects) {
+        for (const name of watermarkNames) {
+          xobjects.delete(PDFName.of(name));
+          removedXObjects++;
+        }
+      }
+    }
+
+    const bytes = await pdfDoc.save({ useObjectStreams: true });
+    return { bytes, pageCount: pages.length, removedAnnots, removedXObjects };
+  }
+
+  processButton.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    processButton.disabled = true;
+    processButton.textContent = "正在本地处理…";
+    setStatus("正在浏览器本地读取和分析 PDF，没有上传文件。", "note");
+    downloadArea.hidden = true;
+    try {
+      const result = await cleanPdf(await selectedFile.arrayBuffer(), $("removeAnnots").checked);
+      const blob = new Blob([result.bytes], { type: "application/pdf" });
+      if (outputUrl) URL.revokeObjectURL(outputUrl);
+      outputUrl = URL.createObjectURL(blob);
+      outputName = selectedFile.name.replace(/\.pdf$/i, "") + "_cleaned.pdf";
+      $("summary").textContent =
+        "页数：" + result.pageCount + "；移除的独立图片对象：" + result.removedXObjects +
+        "；移除的注释对象：" + result.removedAnnots + "。请打开 PDF 检查每一页。";
+      downloadArea.hidden = false;
+      if (result.removedXObjects === 0) {
+        setStatus("没有识别到符合规则的独立水印图片对象。水印可能已与页面图像合并，或该 PDF 的对象结构不同；请检查输出，不要覆盖原件。", "error");
+      } else {
+        setStatus("处理完成。请检查右下角标识是否消失，以及正文、表格线和印章是否完整。", "result");
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus("处理失败：" + (error && error.message ? error.message : String(error)), "error");
+    } finally {
+      processButton.disabled = !selectedFile;
+      processButton.textContent = "在本机处理 PDF";
+    }
+  });
+
+  $("download").addEventListener("click", () => {
+    if (!outputUrl) return;
+    const a = document.createElement("a");
+    a.href = outputUrl;
+    a.download = outputName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+  $("reset").addEventListener("click", () => {
+    fileInput.value = "";
+    selectedFile = null;
+    $("fileInfo").textContent = "尚未选择文件";
+    processButton.disabled = true;
+    downloadArea.hidden = true;
+    status.textContent = "";
+    if (outputUrl) URL.revokeObjectURL(outputUrl);
+    outputUrl = null;
+  });
+})();
+</script>
+</body>
+</html>
