@@ -116,7 +116,7 @@ function detectWatermarkNames(content,resourceNames){
  return names;
 }
 function normalizeWatermarkText(text){
- return String(text||"").replace(/[\\s\\u00a0\\u200b-\\u200f\\u202f\\u3000]/g,"").toLowerCase();
+ return String(text||"").replace(/[\s\u00a0\u200b-\u200f\u202f\u3000]/g,"").toLowerCase();
 }
 function unicodeFromCMapHex(hex){
  const units=[];for(let i=0;i+3<hex.length;i+=4){const n=parseInt(hex.slice(i,i+4),16);if(Number.isFinite(n))units.push(n);}
@@ -128,17 +128,17 @@ function unicodeFromCMapHex(hex){
  return out;
 }
 function buildToUnicodeMap(cmapText){
- const map=new Map(),lengths=new Set(),sourceHex=s=>s.replace(/\\s/g,"").toUpperCase();
- let sectionRe=/beginbfchar([\\s\\S]*?)endbfchar/g,section;
+ const map=new Map(),lengths=new Set(),sourceHex=s=>s.replace(/\s/g,"").toUpperCase();
+ let sectionRe=/beginbfchar([\s\S]*?)endbfchar/g,section;
  while((section=sectionRe.exec(cmapText))!==null){
-  const pairRe=/<([0-9A-Fa-f\\s]+)>\\s*<([0-9A-Fa-f\\s]+)>/g;let pair;
+  const pairRe=/<([0-9A-Fa-f\s]+)>\s*<([0-9A-Fa-f\s]+)>/g;let pair;
   while((pair=pairRe.exec(section[1]))!==null){
    const src=sourceHex(pair[1]),dst=sourceHex(pair[2]);if(src&&dst){map.set(src,unicodeFromCMapHex(dst));lengths.add(src.length/2);}
   }
  }
- sectionRe=/beginbfrange([\\s\\S]*?)endbfrange/g;
+ sectionRe=/beginbfrange([\s\S]*?)endbfrange/g;
  while((section=sectionRe.exec(cmapText))!==null){
-  const rangeRe=/<([0-9A-Fa-f\\s]+)>\\s*<([0-9A-Fa-f\\s]+)>\\s*(<([0-9A-Fa-f\\s]+)>|\\[([\\s\\S]*?)\\])/g;
+  const rangeRe=/<([0-9A-Fa-f\s]+)>\s*<([0-9A-Fa-f\s]+)>\s*(<([0-9A-Fa-f\s]+)>|\[([\s\S]*?)\])/g;
   let range;
   while((range=rangeRe.exec(section[1]))!==null){
    const first=sourceHex(range[1]),last=sourceHex(range[2]),start=parseInt(first,16),end=parseInt(last,16),len=first.length;
@@ -153,7 +153,7 @@ function buildToUnicodeMap(cmapText){
      map.set(src,unicodeFromCMapHex(val));
     }
    }else{
-    const dests=Array.from(range[5].matchAll(/<([0-9A-Fa-f\\s]+)>/g),m=>sourceHex(m[1]));
+    const dests=Array.from(range[5].matchAll(/<([0-9A-Fa-f\s]+)>/g),m=>sourceHex(m[1]));
     for(let n=0;n<Math.min(dests.length,end-start+1);n++){
      map.set((start+n).toString(16).toUpperCase().padStart(len,"0"),unicodeFromCMapHex(dests[n]));
     }
@@ -172,7 +172,7 @@ function decodeWithToUnicode(bytes,cmap){
    key=key.toUpperCase();
    if(cmap.map.has(key)){out+=cmap.map.get(key);i+=len;found=true;break;}
   }
-  if(!found){out+="\\ufffd";i++;}
+  if(!found){out+="\ufffd";i++;}
  }
  return out;
 }
@@ -184,7 +184,7 @@ function buildPageFontMaps(resources,P){
    const font=fonts.lookupMaybe(name,P.PDFDict);if(!font)continue;
    const unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);if(!unicodeStream)continue;
    const cmapText=bytesToLatin1(getStreamBytes(unicodeStream,P)),cmap=buildToUnicodeMap(cmapText);
-   if(cmap.map.size)result.set(name.asString().replace(/^\\//,""),cmap);
+   if(cmap.map.size)result.set(name.asString().replace(/^\//,""),cmap);
   }catch(_){}
  }
  return result;
@@ -220,11 +220,11 @@ function parsePageContentCommands(content,context,P){
    const start=pendingStart===null?tokenStart:pendingStart;
    if(op==="BI"){
     const from=bs.offset(),tail=content.slice(from);
-    const id=/(?:^|[\\x00\\x09\\x0a\\x0c\\x0d ])ID(?=[\\x00\\x09\\x0a\\x0c\\x0d ])/m.exec(tail);
+    const id=/(?:^|[\x00\x09\x0a\x0c\x0d ])ID(?=[\x00\x09\x0a\x0c\x0d ])/m.exec(tail);
     if(!id)throw new Error("无法定位 PDF 内嵌图片数据边界。");
     const dataStart=from+id.index+id[0].length;
     const imageTail=content.slice(dataStart);
-    const ei=/[\\x00\\x09\\x0a\\x0c\\x0d ]EI(?=[\\x00\\x09\\x0a\\x0c\\x0d ()<>\\[\\]{}\\/%]|$)/g;
+    const ei=/[\x00\x09\x0a\x0c\x0d ]EI(?=[\x00\x09\x0a\x0c\x0d ()<>\[\]{}\/%]|$)/g;
     const endMatch=ei.exec(imageTail);
     if(!endMatch)throw new Error("无法定位 PDF 内嵌图片结束标记。");
     const end=dataStart+endMatch.index+endMatch[0].length;
@@ -258,10 +258,10 @@ function removeDirectTextWatermark(content,resources,context,P){
  if(!fontMaps.size)return{content,removed:0};
  const commands=parsePageContentCommands(content,context,P),ranges=[];
  let currentFont="",block=null;
- const showNames=new Set(["Tj","TJ","'","\\\""]);
+ const showNames=new Set(["Tj","TJ","'","\\""]);
  const targets=new Set(["扫描全能王创建","由扫描全能王创建","createdwithcamscanner"]);
  for(const command of commands){
-  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\\//,"");
+  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\//,"");
   if(command.name==="BT")block={show:[]};
   if(block&&showNames.has(command.name)){
    const decoded=textFromShowCommand({...command,fontName:currentFont},fontMaps,P);
