@@ -50,7 +50,7 @@ a{color:var(--blue)}
 <p id="fileInfo" class="file">还没有添加 PDF</p>
 <ul id="fileList" hidden></ul>
 <label class="small"><input id="removeAnnots" type="checkbox" checked> 同时移除 PDF 页面注释/链接对象（可能会移除原有超链接或表单注释）</label>
-<p><label class="small"><input id="removeFooterMark" type="checkbox" checked> 清除每页右下角“扫描全能王 创建”标识（覆盖右下角一小块白色区域）</label></p>
+<p><label class="small"><input id="removeTextWatermark" type="checkbox" checked> 尝试直接删除 PDF 中的“扫描全能王 创建”文字对象（不覆盖、不盖白）</label></p>
 <button id="process" class="primary full" disabled>批量去水印并自动下载</button>
 <progress id="progress" value="0" max="1" hidden></progress>
 <div id="status" aria-live="polite"></div>
@@ -58,7 +58,7 @@ a{color:var(--blue)}
 
 <div class="note"><strong>自动下载：</strong>处理结果会下载到浏览器默认的“下载”文件夹。首次批量处理时，如果浏览器询问是否允许此网站下载多个文件，请选择“允许”。</div>
 <div class="note"><strong>文件名示例：</strong><br>合同.pdf → 合同_无水印_20261114_193055.pdf<br>原文件不会被覆盖。相同名称的文件会自动追加序号。</div>
-<div class="note"><strong>右下角文字标识：</strong>默认会在每页右下角覆盖一块白色区域（约页面宽度的 26%、高度的 4%），用于遮住“扫描全能王 创建”字样。这不是逆向修改 PDF 字体；如果正文、表格、签名或印章靠近右下角，请取消勾选或仔细检查输出。若水印已与整页扫描图像合并且超出该区域，仍可能无法清除。请保留原始 PDF。</div>
+<div class="note"><strong>文字水印：</strong>工具会尝试读取 PDF 字体的 ToUnicode 映射，定位并直接删除内容确认为“扫描全能王 创建”的文字绘制指令，不会用白色方块覆盖页面。为避免误删正文，若水印文字与其他页脚文字混在同一个文字对象中，或字体没有可用的 Unicode 映射，工具会保留该文字并报告未识别。请检查处理结果。</div>
 <p class="small">技术来源：改编自 <a href="https://github.com/masecla22/CamScanner-Watermark-Remover" target="_blank" rel="noopener">masecla22/CamScanner-Watermark-Remover</a>，遵循 MIT 许可。PDF 解析库 pdf-lib 1.17.1。</p>
 </section>
 <footer>网页版和 Release 下载版使用同一份 HTML。PDF 仅在本地处理；网页会从 jsDelivr 加载 PDF 处理库。</footer>
@@ -85,7 +85,7 @@ dropZone.addEventListener("dragover",e=>{e.preventDefault();dropZone.classList.a
 dropZone.addEventListener("dragleave",()=>dropZone.classList.remove("drag"));
 dropZone.addEventListener("drop",e=>{e.preventDefault();dropZone.classList.remove("drag");addFiles(e.dataTransfer.files);});
 
-function bytesToLatin1(bytes){return new TextDecoder("latin1").decode(bytes);}
+function bytesToLatin1(bytes){let out="";for(let i=0;i<bytes.length;i+=8192)out+=String.fromCharCode(...bytes.subarray(i,Math.min(i+8192,bytes.length)));return out;}
 function latin1ToBytes(str){const out=new Uint8Array(str.length);for(let i=0;i<str.length;i++)out[i]=str.charCodeAt(i)&255;return out;}
 function getStreamBytes(stream,P){try{return P.decodePDFRawStream(stream).decode();}catch(_){return stream.contents;}}
 function isDelim(ch){return ch===" "||ch==="\t"||ch==="\n"||ch==="\r"||ch==="\f"||ch==="("||ch===")"||ch==="<"||ch===">"||ch==="["||ch==="]"||ch==="{"||ch==="}"||ch==="/"||ch==="%";}
@@ -115,11 +115,178 @@ function detectWatermarkNames(content,resourceNames){
  let m;while((m=re.exec(content))!==null){const d=parseFloat(m[4]),a=parseFloat(m[1]),name=m[7];if(resourceNames.has(name)&&Math.abs(d)>0&&Math.abs(d)<=40&&Math.abs(a)<=300)names.add(name);}
  return names;
 }
-async function cleanPdf(arrayBuffer,removeAnnotations,removeFooterMark){
+function normalizeWatermarkText(text){
+ return String(text||"").replace(/[\\s\\u00a0\\u200b-\\u200f\\u202f\\u3000]/g,"").toLowerCase();
+}
+function unicodeFromCMapHex(hex){
+ const units=[];for(let i=0;i+3<hex.length;i+=4){const n=parseInt(hex.slice(i,i+4),16);if(Number.isFinite(n))units.push(n);}
+ let out="";for(let i=0;i<units.length;i++){
+  const a=units[i];
+  if(a>=0xd800&&a<=0xdbff&&i+1<units.length&&units[i+1]>=0xdc00&&units[i+1]<=0xdfff){out+=String.fromCharCode(a,units[++i]);}
+  else out+=String.fromCharCode(a);
+ }
+ return out;
+}
+function buildToUnicodeMap(cmapText){
+ const map=new Map(),lengths=new Set(),sourceHex=s=>s.replace(/\\s/g,"").toUpperCase();
+ let sectionRe=/beginbfchar([\\s\\S]*?)endbfchar/g,section;
+ while((section=sectionRe.exec(cmapText))!==null){
+  const pairRe=/<([0-9A-Fa-f\\s]+)>\\s*<([0-9A-Fa-f\\s]+)>/g;let pair;
+  while((pair=pairRe.exec(section[1]))!==null){
+   const src=sourceHex(pair[1]),dst=sourceHex(pair[2]);if(src&&dst){map.set(src,unicodeFromCMapHex(dst));lengths.add(src.length/2);}
+  }
+ }
+ sectionRe=/beginbfrange([\\s\\S]*?)endbfrange/g;
+ while((section=sectionRe.exec(cmapText))!==null){
+  const rangeRe=/<([0-9A-Fa-f\\s]+)>\\s*<([0-9A-Fa-f\\s]+)>\\s*(<([0-9A-Fa-f\\s]+)>|\\[([\\s\\S]*?)\\])/g;
+  let range;
+  while((range=rangeRe.exec(section[1]))!==null){
+   const first=sourceHex(range[1]),last=sourceHex(range[2]),start=parseInt(first,16),end=parseInt(last,16),len=first.length;
+   if(!Number.isFinite(start)||!Number.isFinite(end)||end<start||end-start>8192)continue;
+   lengths.add(len/2);
+   if(range[4]){
+    const dst=sourceHex(range[4]),width=dst.length;
+    const base=parseInt(dst,16);if(!Number.isFinite(base))continue;
+    for(let n=0;n<=end-start;n++){
+     const src=(start+n).toString(16).toUpperCase().padStart(len,"0");
+     const val=(base+n).toString(16).toUpperCase().padStart(width,"0");
+     map.set(src,unicodeFromCMapHex(val));
+    }
+   }else{
+    const dests=Array.from(range[5].matchAll(/<([0-9A-Fa-f\\s]+)>/g),m=>sourceHex(m[1]));
+    for(let n=0;n<Math.min(dests.length,end-start+1);n++){
+     map.set((start+n).toString(16).toUpperCase().padStart(len,"0"),unicodeFromCMapHex(dests[n]));
+    }
+   }
+  }
+ }
+ return{map,lengths:Array.from(lengths).sort((a,b)=>b-a)};
+}
+function decodeWithToUnicode(bytes,cmap){
+ let out="";
+ for(let i=0;i<bytes.length;){
+  let found=false;
+  for(const len of cmap.lengths){
+   if(i+len>bytes.length)continue;
+   let key="";for(let j=0;j<len;j++)key+=bytes[i+j].toString(16).padStart(2,"0");
+   key=key.toUpperCase();
+   if(cmap.map.has(key)){out+=cmap.map.get(key);i+=len;found=true;break;}
+  }
+  if(!found){out+="\\ufffd";i++;}
+ }
+ return out;
+}
+function buildPageFontMaps(resources,P){
+ const result=new Map();if(!resources)return result;
+ const fonts=resources.lookupMaybe(P.PDFName.of("Font"),P.PDFDict);if(!fonts)return result;
+ for(const name of fonts.keys()){
+  try{
+   const font=fonts.lookupMaybe(name,P.PDFDict);if(!font)continue;
+   const unicodeStream=font.lookupMaybe(P.PDFName.of("ToUnicode"),P.PDFStream);if(!unicodeStream)continue;
+   const cmapText=bytesToLatin1(getStreamBytes(unicodeStream,P)),cmap=buildToUnicodeMap(cmapText);
+   if(cmap.map.size)result.set(name.asString().replace(/^\\//,""),cmap);
+  }catch(_){}
+ }
+ return result;
+}
+function parsePageContentCommands(content,context,P){
+ const parser=P.PDFObjectParser.forBytes(latin1ToBytes(content),context),bs=parser.bytes,commands=[];
+ let args=[],pendingStart=null;
+ const ws=b=>b===0||b===9||b===10||b===12||b===13||b===32;
+ const delim=b=>ws(b)||b===40||b===41||b===60||b===62||b===91||b===93||b===123||b===125||b===47||b===37;
+ function skipSpaceAndComments(){
+  while(!bs.done()){
+   const b=bs.peek();
+   if(ws(b)){bs.next();continue;}
+   if(b===37){while(!bs.done()&&bs.peek()!==10&&bs.peek()!==13)bs.next();continue;}
+   break;
+  }
+ }
+ function readWord(){
+  let word="";while(!bs.done()&&!delim(bs.peek()))word+=String.fromCharCode(bs.next());
+  return word;
+ }
+ while(!bs.done()){
+  skipSpaceAndComments();if(bs.done())break;
+  const tokenStart=bs.offset();
+  try{
+   const obj=parser.parseObject();
+   if(pendingStart===null)pendingStart=tokenStart;
+   args.push(obj);
+  }catch(_){
+   bs.moveTo(tokenStart);
+   const op=readWord();
+   if(!op)throw new Error("无法安全解析 PDF 页面内容流（位置 "+tokenStart+"）。");
+   const start=pendingStart===null?tokenStart:pendingStart;
+   if(op==="BI"){
+    const from=bs.offset(),tail=content.slice(from);
+    const id=/(?:^|[\\x00\\x09\\x0a\\x0c\\x0d ])ID(?=[\\x00\\x09\\x0a\\x0c\\x0d ])/m.exec(tail);
+    if(!id)throw new Error("无法定位 PDF 内嵌图片数据边界。");
+    const dataStart=from+id.index+id[0].length;
+    const imageTail=content.slice(dataStart);
+    const ei=/[\\x00\\x09\\x0a\\x0c\\x0d ]EI(?=[\\x00\\x09\\x0a\\x0c\\x0d ()<>\\[\\]{}\\/%]|$)/g;
+    const endMatch=ei.exec(imageTail);
+    if(!endMatch)throw new Error("无法定位 PDF 内嵌图片结束标记。");
+    const end=dataStart+endMatch.index+endMatch[0].length;
+    commands.push({name:"INLINE_IMAGE",args,start,end});bs.moveTo(end);
+   }else{
+    commands.push({name:op,args,start,end:bs.offset()});
+   }
+   args=[];pendingStart=null;
+  }
+ }
+ return commands;
+}
+function textFromShowCommand(command,fontMaps,P){
+ const fontName=command.fontName||"",cmap=fontMaps.get(fontName);
+ const getText=obj=>{
+  if(obj instanceof P.PDFString||obj instanceof P.PDFHexString){
+   const bytes=obj.asBytes();return cmap?decodeWithToUnicode(bytes,cmap):obj.decodeText();
+  }
+  return "";
+ };
+ if(command.name==="Tj"||command.name==="'")return getText(command.args[0]);
+ if(command.name==='"')return getText(command.args[2]);
+ if(command.name==="TJ"){
+  const arr=command.args[0];if(!(arr instanceof P.PDFArray))return "";
+  return arr.asArray().map(getText).join("");
+ }
+ return "";
+}
+function removeDirectTextWatermark(content,resources,context,P){
+ const fontMaps=buildPageFontMaps(resources,P);
+ if(!fontMaps.size)return{content,removed:0};
+ const commands=parsePageContentCommands(content,context,P),ranges=[];
+ let currentFont="",block=null;
+ const showNames=new Set(["Tj","TJ","'","\\\""]);
+ const targets=new Set(["扫描全能王创建","由扫描全能王创建","createdwithcamscanner"]);
+ for(const command of commands){
+  if(command.name==="Tf"&&command.args[0] instanceof P.PDFName)currentFont=command.args[0].asString().replace(/^\\//,"");
+  if(command.name==="BT")block={show:[]};
+  if(block&&showNames.has(command.name)){
+   const decoded=textFromShowCommand({...command,fontName:currentFont},fontMaps,P);
+   block.show.push({command,text:decoded});
+  }
+  if(command.name==="ET"&&block){
+   const combined=normalizeWatermarkText(block.show.map(x=>x.text).join(""));
+   if(targets.has(combined)&&block.show.length){
+    for(const item of block.show)ranges.push([item.command.start,item.command.end]);
+   }
+   block=null;
+  }
+ }
+ if(!ranges.length)return{content,removed:0};
+ let output=content;
+ ranges.sort((a,b)=>b[0]-a[0]);
+ for(const [start,end] of ranges)output=output.slice(0,start)+output.slice(end);
+ return{content:output,removed:ranges.length};
+}
+
+async function cleanPdf(arrayBuffer,removeAnnotations,removeTextWatermark){
  const P=window.PDFLib;if(!P||!P.PDFDocument)throw new Error("PDF 处理库没有加载成功。请联网刷新网页后重试。");
  const {PDFDocument,PDFDict,PDFName,PDFArray,PDFRawStream}=P;
  const pdfDoc=await PDFDocument.load(arrayBuffer,{updateMetadata:false,ignoreEncryption:true});
- let removedAnnots=0,removedXObjects=0,removedFooterMarks=0;const pages=pdfDoc.getPages();
+ let removedAnnots=0,removedXObjects=0,removedTextWatermarks=0;const pages=pdfDoc.getPages();
  for(const page of pages){
   const node=page.node;
   if(removeAnnotations){
@@ -138,29 +305,19 @@ async function cleanPdf(arrayBuffer,removeAnnotations,removeFooterMark){
   if(streams.length){
    let combined="";for(const s of streams){combined+=bytesToLatin1(getStreamBytes(s,P));if(!combined.endsWith("\n"))combined+="\n";}
    const names=detectWatermarkNames(combined,resourceNames);
-   const cleaned=names.size?stripXObjectDraws(combined,names):combined;
-   // Keep /Contents as a PDF array: pdf-lib appends draw operators by calling
-   // PDFArray.push(), which fails when /Contents is stored as one bare stream.
+   let cleaned=names.size?stripXObjectDraws(combined,names):combined;
+   if(removeTextWatermark){
+    const textResult=removeDirectTextWatermark(cleaned,resources,pdfDoc.context,P);
+    cleaned=textResult.content;removedTextWatermarks+=textResult.removed;
+   }
+   // Keep /Contents as a PDF array so pdf-lib can append future page content safely.
    const normalizedStream=pdfDoc.context.flateStream(latin1ToBytes(cleaned));
    const normalizedRef=pdfDoc.context.register(normalizedStream);
    node.set(PDFName.of("Contents"),pdfDoc.context.obj([normalizedRef]));
    if(xobjects)for(const name of names){xobjects.delete(PDFName.of(name));removedXObjects++;}
   }
-  if(removeFooterMark){
-   const {width,height}=page.getSize();
-   const coverWidth=Math.min(Math.max(width*0.26,100),160);
-   const coverHeight=Math.min(Math.max(height*0.04,22),34);
-   const rotation=((page.getRotation().angle%360)+360)%360;
-   let cover;
-   if(rotation===90)cover={x:width-coverHeight,y:height-coverWidth,width:coverHeight,height:coverWidth};
-   else if(rotation===180)cover={x:0,y:height-coverHeight,width:coverWidth,height:coverHeight};
-   else if(rotation===270)cover={x:0,y:0,width:coverHeight,height:coverWidth};
-   else cover={x:width-coverWidth,y:0,width:coverWidth,height:coverHeight};
-   page.drawRectangle({...cover,color:P.rgb(1,1,1)});
-   removedFooterMarks++;
-  }
  }
- return{bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects,removedFooterMarks};
+ return{bytes:await pdfDoc.save({useObjectStreams:true}),pageCount:pages.length,removedAnnots,removedXObjects,removedTextWatermarks};
 }
 function makeTimestamp(){
  const d=new Date(),p=n=>String(n).padStart(2,"0");
@@ -184,19 +341,19 @@ processButton.addEventListener("click",async()=>{
  for(let i=0;i<selectedFiles.length;i++){
   const file=selectedFiles[i];setStatus("正在处理 "+(i+1)+"/"+selectedFiles.length+"："+file.name,"note");
   try{
-   const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked,$("removeFooterMark").checked);
+   const result=await cleanPdf(await file.arrayBuffer(),$("removeAnnots").checked,$("removeTextWatermark").checked);
    const name=makeOutputName(file,stamp,nameCounts),blob=new Blob([result.bytes],{type:"application/pdf"});
    triggerDownload(blob,name);success++;
    const detected=result.removedXObjects>0?"已移除 "+result.removedXObjects+" 个独立图片对象":"未检测到独立图片对象";
-   if(result.removedXObjects===0&&!result.removedFooterMarks)unmatched++;
-   const footer=result.removedFooterMarks?"；右下角遮盖已应用 "+result.removedFooterMarks+" 页":"";
-   lines.push("✓ "+file.name+" → "+name+"（"+detected+footer+"）");
+   if(result.removedXObjects===0&&result.removedTextWatermarks===0)unmatched++;
+   const textInfo=result.removedTextWatermarks?"；直接删除文字水印指令 "+result.removedTextWatermarks+" 条":"";
+   lines.push("✓ "+file.name+" → "+name+"（"+detected+textInfo+"）");
    await wait(450);
   }catch(e){failed++;lines.push("✕ "+file.name+"：处理失败 - "+(e.message||String(e)));}
   $("progress").value=i+1;$("results").textContent=lines.join("\n");
  }
  processButton.disabled=false;
- const message="批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+(unmatched?"；其中 "+unmatched+" 个未检测到可独立删除的图片水印对象或右下角遮盖。":"")+"请检查浏览器下载列表。";
+ const message="批量处理结束：成功 "+success+" 个，失败 "+failed+" 个。"+(unmatched?"；其中 "+unmatched+" 个未识别到可安全直接删除的水印文字或独立图片对象，可能需要适配该 PDF 的字体/内容结构。":"")+"请检查浏览器下载列表。";
  setStatus(message,failed||unmatched?"error":"success");
  $("results").textContent=lines.join("\n")+"\n\n"+message+"\n保存位置：浏览器设置中的默认下载文件夹。";
 });
